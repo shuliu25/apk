@@ -17,4 +17,12 @@ class TrailPreferences(context: Context) {
         get() = data.getLong("next_expected_capture_millis", 0L)
         set(value) = data.edit().putLong("next_expected_capture_millis", value).apply()
 
+    var activeTask: String?
+        get() = data.getString("active_task", null)
+        set(value) = data.edit().putString("active_task", value).apply()
+
+    var activeTaskStartedMillis: Long
+        get() = data.getLong("active_task_started_millis", 0L)
+        set(value) = data.edit().putLong("active_task_started_millis", value).apply()
+
 }

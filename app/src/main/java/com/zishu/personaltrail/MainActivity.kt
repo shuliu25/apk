@@ -36,9 +36,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scheduleTime: TextView
     private lateinit var scheduleDetail: TextView
     private lateinit var notice: TextView
+    private lateinit var taskState: TextView
+    private lateinit var taskInput: EditText
+    private lateinit var taskButton: Button
     private lateinit var thought: EditText
     private lateinit var selectedImage: TextView
     private var selectedImageUri: Uri? = null
+    private var setupNeeded = true
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -46,6 +50,7 @@ class MainActivity : AppCompatActivity() {
         contentResolver.takePersistableUriPermission(uri, flags)
         preferences.treeUri = uri.toString()
         TrailWorker.schedule(this)
+        rebuildIfSetupChanged()
         refreshSchedule()
         showFeedback("输出位置已设置，后台采集已开始", true)
     }
@@ -61,13 +66,15 @@ class MainActivity : AppCompatActivity() {
         window.navigationBarColor = paper
         preferences = TrailPreferences(this)
         if (preferences.treeUri != null && preferences.nextExpectedCaptureMillis == 0L) TrailWorker.schedule(this)
+        setupNeeded = needsSetup()
         setContentView(buildScreen())
         refreshSchedule()
     }
 
     override fun onResume() {
         super.onResume()
-        if (::scheduleTime.isInitialized) refreshSchedule()
+        if (!::scheduleTime.isInitialized) return
+        if (needsSetup() != setupNeeded) rebuildIfSetupChanged() else refreshSchedule()
     }
 
     private fun buildScreen(): ScrollView {
@@ -87,39 +94,25 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(notice)
 
-        root.addView(sectionTitle("今天"))
+        root.addView(sectionTitle("此刻"))
+        root.addView(taskCard())
+        root.addView(space(10))
         root.addView(card("补上一段轨迹", "现在手动采集一次；后台仍会按小时继续") {
             addView(actionButton("现在采集一次", true) { captureNow() })
         })
 
         root.addView(sectionTitle("留住一闪而过的东西"))
-        root.addView(card("碎碎念", "无需整理成结论，先让它留下来") {
-            thought = EditText(this@MainActivity).apply {
-                hint = "写下一句话，不必完整，也不必漂亮"
-                textSize = 16f
-                setTextColor(ink)
-                setHintTextColor(Color.rgb(126, 142, 136))
-                minLines = 4
-                gravity = Gravity.TOP
-                setPadding(dp(15), dp(14), dp(15), dp(14))
-                background = rounded(Color.WHITE, 16, line, 1)
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            }
-            addView(thought)
-            addView(space(12))
-            selectedImage = bodyText("可选：附上一张当下的图片").apply {
-                setPadding(dp(14), dp(12), dp(14), dp(12))
-                background = rounded(Color.rgb(250, 247, 239), 14)
-            }
-            addView(selectedImage)
-            addView(space(8))
-            addView(actionButton("选择关联图片", false) { imagePicker.launch("image/*") })
-            addView(space(10))
-            addView(actionButton("记录这句碎碎念", true) { saveThought() })
+        root.addView(thoughtCard())
+
+        root.addView(sectionTitle("回看"))
+        root.addView(card("已经留下的记录", "按日期查看碎碎念、关联图片和完整轨迹日志") {
+            addView(actionButton("打开记录画廊", false) { openRecords() })
         })
 
-        root.addView(sectionTitle("首次使用时设置"))
-        root.addView(compactSettingsCard())
+        if (setupNeeded) {
+            root.addView(sectionTitle("首次使用时设置"))
+            root.addView(compactSettingsCard())
+        }
         root.addView(bodyText("应用只写入你选择的文件夹；Operit 负责同步到 GitHub。", 13f).apply {
             setTextColor(Color.rgb(102, 120, 112))
             setPadding(dp(4), dp(18), dp(4), 0)
@@ -176,6 +169,68 @@ class MainActivity : AppCompatActivity() {
         addView(space(4))
         scheduleDetail = bodyText("", 13f).apply { setTextColor(Color.rgb(88, 112, 101)) }
         addView(scheduleDetail)
+    }
+
+    private fun taskCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        background = rounded(Color.WHITE, 22, line, 1)
+        addView(TextView(this@MainActivity).apply {
+            text = "给这一段命名"
+            textSize = 18f
+            setTextColor(ink)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        addView(bodyText("例如：学习方剂、看书、出门办事。任务和 App 切换会一起写进时间线。", 14f).apply {
+            setTextColor(Color.rgb(102, 120, 112))
+            setPadding(0, dp(5), 0, dp(13))
+        })
+        taskState = bodyText("", 14f).apply {
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            background = rounded(Color.rgb(250, 247, 239), 14)
+        }
+        addView(taskState)
+        addView(space(10))
+        taskInput = EditText(this@MainActivity).apply {
+            hint = "我现在要做什么？"
+            textSize = 15f
+            singleLine = true
+            setTextColor(ink)
+            setHintTextColor(Color.rgb(126, 142, 136))
+            setPadding(dp(14), 0, dp(14), 0)
+            background = rounded(Color.WHITE, 15, line, 1)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+        }
+        addView(taskInput)
+        addView(space(10))
+        taskButton = actionButton("", true) { toggleTask() }
+        addView(taskButton)
+        refreshTaskCard()
+    }
+
+    private fun thoughtCard(): LinearLayout = card("碎碎念", "无需整理成结论，先让它留下来") {
+        thought = EditText(this@MainActivity).apply {
+            hint = "写下一句话，不必完整，也不必漂亮"
+            textSize = 16f
+            setTextColor(ink)
+            setHintTextColor(Color.rgb(126, 142, 136))
+            minLines = 4
+            gravity = Gravity.TOP
+            setPadding(dp(15), dp(14), dp(15), dp(14))
+            background = rounded(Color.WHITE, 16, line, 1)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        addView(thought)
+        addView(space(12))
+        selectedImage = bodyText("可选：附上一张当下的图片").apply {
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(Color.rgb(250, 247, 239), 14)
+        }
+        addView(selectedImage)
+        addView(space(8))
+        addView(actionButton("选择关联图片", false) { imagePicker.launch("image/*") })
+        addView(space(10))
+        addView(actionButton("记录这句碎碎念", true) { saveThought() })
     }
 
     private fun compactSettingsCard(): LinearLayout = LinearLayout(this).apply {
@@ -254,13 +309,9 @@ class MainActivity : AppCompatActivity() {
         gravity = Gravity.CENTER_VERTICAL
     }
 
-    private fun space(height: Int): View = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(1, dp(height))
-    }
+    private fun space(height: Int): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
 
-    private fun spaceWidth(width: Int): View = View(this).apply {
-        layoutParams = LinearLayout.LayoutParams(dp(width), 1)
-    }
+    private fun spaceWidth(width: Int): View = View(this).apply { layoutParams = LinearLayout.LayoutParams(dp(width), 1) }
 
     private fun rounded(color: Int, radius: Int, stroke: Int? = null, strokeWidth: Int = 0): GradientDrawable = GradientDrawable().apply {
         setColor(color)
@@ -278,6 +329,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun toggleTask() {
+        lifecycleScope.launch {
+            val collector = TimelineCollector(this@MainActivity)
+            val starting = preferences.activeTask == null
+            val result = if (starting) collector.startTask(taskInput.text.toString()) else collector.finishTask()
+            if (result.success && starting) taskInput.setText("")
+            refreshTaskCard()
+            showFeedback(result.message, result.success)
+        }
+    }
+
     private fun saveThought() {
         lifecycleScope.launch {
             val result = TimelineCollector(this@MainActivity).appendThought(thought.text.toString(), selectedImageUri)
@@ -290,19 +352,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateSelectedImage() {
-        selectedImage.text = if (selectedImageUri == null) {
-            "可选：附上一张当下的图片"
+    private fun openRecords() {
+        if (preferences.treeUri == null) {
+            showFeedback("先完成一次文件夹设置，才能回看记录", false)
         } else {
-            "已选择一张图片，保存时会写入当天的 screenshots 文件夹"
+            startActivity(Intent(this, RecordsActivity::class.java))
         }
+    }
+
+    private fun refreshTaskCard() {
+        val task = preferences.activeTask
+        if (task == null) {
+            taskState.text = "还没有给这一段命名"
+            taskInput.visibility = View.VISIBLE
+            taskButton.text = "开始记录这件事"
+        } else {
+            val started = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(preferences.activeTaskStartedMillis))
+            taskState.text = "正在进行：$task  ·  $started 开始"
+            taskInput.visibility = View.GONE
+            taskButton.text = "结束“$task”"
+        }
+    }
+
+    private fun updateSelectedImage() {
+        selectedImage.text = if (selectedImageUri == null) "可选：附上一张当下的图片" else "已选择一张图片，保存时会写入当天的 screenshots 文件夹"
     }
 
     private fun refreshSchedule() {
         if (preferences.treeUri == null) {
             scheduleTitle.text = "采集节奏"
             scheduleTime.text = "还未安排"
-            scheduleDetail.text = "先在下方选择日志输出文件夹，系统才会开始每小时采集。"
+            scheduleDetail.text = "完成一次设置后，系统会开始每小时采集。"
             return
         }
         val next = preferences.nextExpectedCaptureMillis
@@ -321,6 +401,20 @@ class MainActivity : AppCompatActivity() {
         scheduleTitle.text = "下一次预计采集"
         scheduleTime.text = "$clock 左右"
         scheduleDetail.text = "每小时一次；系统省电时可能延后，但会从上次位置补查。"
+    }
+
+    private fun needsSetup(): Boolean {
+        if (preferences.treeUri == null) return true
+        val manager = getSystemService(APP_OPS_SERVICE) as android.app.AppOpsManager
+        return manager.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), packageName) != android.app.AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun rebuildIfSetupChanged() {
+        val nowNeeded = needsSetup()
+        if (nowNeeded != setupNeeded) {
+            setupNeeded = nowNeeded
+            setContentView(buildScreen())
+        }
     }
 
     private fun showFeedback(message: String, success: Boolean) {

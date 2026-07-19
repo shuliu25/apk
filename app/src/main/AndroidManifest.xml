@@ -11,6 +11,8 @@
         android:roundIcon="@drawable/personal_trail_icon"
         android:theme="@style/Theme.PersonalTrail"
         android:usesCleartextTraffic="false">
+        <activity android:name=".RecordDayActivity" android:exported="false" />
+        <activity android:name=".RecordsActivity" android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

@@ -70,6 +70,35 @@ class TimelineCollector(private val context: Context) {
         CaptureResult(true, "已写入 $day/notes.txt")
     }
 
+    suspend fun startTask(task: String): CaptureResult = withContext(Dispatchers.IO) {
+        val root = outputRoot() ?: return@withContext CaptureResult(false, "请先选择日志输出文件夹")
+        val clean = task.trim()
+        if (clean.isBlank()) return@withContext CaptureResult(false, "先写下要做什么")
+        if (prefs.activeTask != null) return@withContext CaptureResult(false, "请先结束正在进行的“${prefs.activeTask}”")
+        val now = System.currentTimeMillis()
+        val day = dayFormat.format(Date(now))
+        val dayDirectory = root.findFile(day) ?: root.createDirectory(day)
+            ?: return@withContext CaptureResult(false, "无法创建当天文件夹")
+        appendText(dayDirectory, "timeline.txt", "\n[${timeFormat.format(Date(now))}] [手动任务开始] $clean\n")
+        prefs.activeTask = clean
+        prefs.activeTaskStartedMillis = now
+        CaptureResult(true, "已开始：$clean")
+    }
+
+    suspend fun finishTask(): CaptureResult = withContext(Dispatchers.IO) {
+        val root = outputRoot() ?: return@withContext CaptureResult(false, "请先选择日志输出文件夹")
+        val task = prefs.activeTask ?: return@withContext CaptureResult(false, "当前没有正在进行的任务")
+        val now = System.currentTimeMillis()
+        val day = dayFormat.format(Date(now))
+        val dayDirectory = root.findFile(day) ?: root.createDirectory(day)
+            ?: return@withContext CaptureResult(false, "无法创建当天文件夹")
+        val started = if (prefs.activeTaskStartedMillis > 0L) timeFormat.format(Date(prefs.activeTaskStartedMillis)) else "稍早"
+        appendText(dayDirectory, "timeline.txt", "\n[${timeFormat.format(Date(now))}] [手动任务结束] $task（开始于 $started）\n")
+        prefs.activeTask = null
+        prefs.activeTaskStartedMillis = 0L
+        CaptureResult(true, "已结束：$task")
+    }
+
     private fun outputRoot(): DocumentFile? = prefs.treeUri?.let { DocumentFile.fromTreeUri(context, Uri.parse(it)) }
 
     private fun hasUsageAccess(): Boolean {

@@ -13,4 +13,8 @@ class TrailPreferences(context: Context) {
         get() = data.getLong("last_event_millis", 0L)
         set(value) = data.edit().putLong("last_event_millis", value).apply()
 
+    var nextExpectedCaptureMillis: Long
+        get() = data.getLong("next_expected_capture_millis", 0L)
+        set(value) = data.edit().putLong("next_expected_capture_millis", value).apply()
+
 }

@@ -19,6 +19,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private val paper = Color.rgb(247, 245, 239)
@@ -26,10 +29,13 @@ class MainActivity : AppCompatActivity() {
     private val teal = Color.rgb(53, 104, 89)
     private val paleTeal = Color.rgb(231, 240, 235)
     private val line = Color.rgb(210, 222, 216)
-    private val amber = Color.rgb(217, 154, 59)
+    private val amberPale = Color.rgb(253, 242, 219)
 
     private lateinit var preferences: TrailPreferences
-    private lateinit var status: TextView
+    private lateinit var scheduleTitle: TextView
+    private lateinit var scheduleTime: TextView
+    private lateinit var scheduleDetail: TextView
+    private lateinit var notice: TextView
     private lateinit var thought: EditText
     private lateinit var selectedImage: TextView
     private var selectedImageUri: Uri? = null
@@ -40,7 +46,8 @@ class MainActivity : AppCompatActivity() {
         contentResolver.takePersistableUriPermission(uri, flags)
         preferences.treeUri = uri.toString()
         TrailWorker.schedule(this)
-        refreshStatus("输出位置已设置，后台采集已开始")
+        refreshSchedule()
+        showFeedback("输出位置已设置，后台采集已开始", true)
     }
 
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -53,36 +60,35 @@ class MainActivity : AppCompatActivity() {
         window.statusBarColor = paper
         window.navigationBarColor = paper
         preferences = TrailPreferences(this)
+        if (preferences.treeUri != null && preferences.nextExpectedCaptureMillis == 0L) TrailWorker.schedule(this)
         setContentView(buildScreen())
-        refreshStatus()
+        refreshSchedule()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::scheduleTime.isInitialized) refreshSchedule()
     }
 
     private fun buildScreen(): ScrollView {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(22), dp(20), dp(32))
-            background = solid(paper, 0)
+            background = rounded(paper, 0)
         }
 
         root.addView(hero())
         root.addView(space(14))
-        status = bodyText("").apply {
-            setPadding(dp(16), dp(13), dp(16), dp(13))
-            background = rounded(paleTeal, 16)
+        root.addView(scheduleCard())
+        root.addView(space(10))
+        notice = bodyText("").apply {
+            visibility = View.GONE
+            setPadding(dp(16), dp(14), dp(16), dp(14))
         }
-        root.addView(status)
+        root.addView(notice)
 
-        root.addView(sectionTitle("准备好记录"))
-        root.addView(card("只需完成一次设置", "系统记录使用轨迹，Operit 负责推送到 GitHub") {
-            addView(actionButton("授权使用情况访问", false) {
-                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-            })
-            addView(space(10))
-            addView(actionButton("选择日志输出文件夹", false) { folderPicker.launch(null) })
-        })
-
-        root.addView(sectionTitle("此刻"))
-        root.addView(card("让今天有一条可回看的线", "每小时补采一次；也可以现在手动采集") {
+        root.addView(sectionTitle("今天"))
+        root.addView(card("补上一段轨迹", "现在手动采集一次；后台仍会按小时继续") {
             addView(actionButton("现在采集一次", true) { captureNow() })
         })
 
@@ -112,7 +118,9 @@ class MainActivity : AppCompatActivity() {
             addView(actionButton("记录这句碎碎念", true) { saveThought() })
         })
 
-        root.addView(bodyText("你的内容只写入你选择的文件夹。应用不保存 GitHub 密钥；由 Operit 负责同步。", 13f).apply {
+        root.addView(sectionTitle("首次使用时设置"))
+        root.addView(compactSettingsCard())
+        root.addView(bodyText("应用只写入你选择的文件夹；Operit 负责同步到 GitHub。", 13f).apply {
             setTextColor(Color.rgb(102, 120, 112))
             setPadding(dp(4), dp(18), dp(4), 0)
         })
@@ -146,6 +154,44 @@ class MainActivity : AppCompatActivity() {
             textSize = 13f
             setPadding(dp(12), dp(8), dp(12), dp(8))
             background = rounded(Color.rgb(73, 124, 106), 14)
+        })
+    }
+
+    private fun scheduleCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(16), dp(18), dp(16))
+        background = rounded(paleTeal, 22)
+        scheduleTitle = bodyText("采集节奏", 14f).apply {
+            setTextColor(teal)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        addView(scheduleTitle)
+        addView(space(4))
+        scheduleTime = TextView(this@MainActivity).apply {
+            textSize = 22f
+            setTextColor(ink)
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        addView(scheduleTime)
+        addView(space(4))
+        scheduleDetail = bodyText("", 13f).apply { setTextColor(Color.rgb(88, 112, 101)) }
+        addView(scheduleDetail)
+    }
+
+    private fun compactSettingsCard(): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(16), dp(15), dp(16), dp(15))
+        background = rounded(Color.WHITE, 20, line, 1)
+        addView(bodyText("只需设置一次", 16f).apply { typeface = Typeface.DEFAULT_BOLD })
+        addView(bodyText("允许系统读取使用记录，并选择 Operit 同步的目录。", 13f).apply {
+            setTextColor(Color.rgb(102, 120, 112))
+            setPadding(0, dp(4), 0, dp(12))
+        })
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(compactButton("授权使用") { startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, LinearLayout.LayoutParams(0, dp(44), 1f))
+            addView(spaceWidth(8))
+            addView(compactButton("选择文件夹") { folderPicker.launch(null) }, LinearLayout.LayoutParams(0, dp(44), 1f))
         })
     }
 
@@ -189,6 +235,18 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { action() }
     }
 
+    private fun compactButton(text: String, action: () -> Unit): Button = Button(this).apply {
+        this.text = text
+        textSize = 14f
+        isAllCaps = false
+        setTextColor(teal)
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(4), 0, dp(4), 0)
+        background = rounded(Color.rgb(250, 252, 250), 14, line, 1)
+        setOnClickListener { action() }
+    }
+
     private fun bodyText(text: String, size: Float = 14f): TextView = TextView(this).apply {
         this.text = text
         textSize = size
@@ -200,20 +258,23 @@ class MainActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(1, dp(height))
     }
 
+    private fun spaceWidth(width: Int): View = View(this).apply {
+        layoutParams = LinearLayout.LayoutParams(dp(width), 1)
+    }
+
     private fun rounded(color: Int, radius: Int, stroke: Int? = null, strokeWidth: Int = 0): GradientDrawable = GradientDrawable().apply {
         setColor(color)
         cornerRadius = dp(radius).toFloat()
         if (stroke != null) setStroke(dp(strokeWidth), stroke)
     }
 
-    private fun solid(color: Int, radius: Int): GradientDrawable = rounded(color, radius)
-
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     private fun captureNow() {
         lifecycleScope.launch {
             val result = TimelineCollector(this@MainActivity).capture("手动采集")
-            refreshStatus(result.message)
+            refreshSchedule()
+            showFeedback(result.message, result.success)
         }
     }
 
@@ -225,7 +286,7 @@ class MainActivity : AppCompatActivity() {
                 selectedImageUri = null
                 updateSelectedImage()
             }
-            refreshStatus(result.message)
+            showFeedback(result.message, result.success)
         }
     }
 
@@ -237,8 +298,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshStatus(message: String? = null) {
-        val folder = if (preferences.treeUri == null) "还未设置输出文件夹" else "输出位置已设置"
-        status.text = listOfNotNull(message, "状态：$folder").joinToString("\n")
+    private fun refreshSchedule() {
+        if (preferences.treeUri == null) {
+            scheduleTitle.text = "采集节奏"
+            scheduleTime.text = "还未安排"
+            scheduleDetail.text = "先在下方选择日志输出文件夹，系统才会开始每小时采集。"
+            return
+        }
+        val next = preferences.nextExpectedCaptureMillis
+        if (next <= 0L) {
+            TrailWorker.schedule(this)
+            refreshSchedule()
+            return
+        }
+        if (next < System.currentTimeMillis()) {
+            scheduleTitle.text = "采集节奏"
+            scheduleTime.text = "正在等待系统补采"
+            scheduleDetail.text = "系统省电时会推迟执行；恢复后会从上次位置补查，不会直接跳过中间轨迹。"
+            return
+        }
+        val clock = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(next))
+        scheduleTitle.text = "下一次预计采集"
+        scheduleTime.text = "$clock 左右"
+        scheduleDetail.text = "每小时一次；系统省电时可能延后，但会从上次位置补查。"
+    }
+
+    private fun showFeedback(message: String, success: Boolean) {
+        notice.visibility = View.VISIBLE
+        notice.text = if (success) "✓  $message" else "需要处理：$message"
+        notice.setTextColor(if (success) teal else Color.rgb(132, 84, 24))
+        notice.background = rounded(if (success) paleTeal else amberPale, 16)
     }
 }

@@ -12,6 +12,7 @@ class TrailWorker(appContext: Context, params: WorkerParameters) : CoroutineWork
     override suspend fun doWork(): Result {
         return runCatching {
             TimelineCollector(applicationContext).capture("定时采集")
+            TrailPreferences(applicationContext).nextExpectedCaptureMillis = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(1)
             Result.success()
         }.getOrElse { Result.retry() }
     }
@@ -26,6 +27,7 @@ class TrailWorker(appContext: Context, params: WorkerParameters) : CoroutineWork
                 ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
+            TrailPreferences(context).nextExpectedCaptureMillis = System.currentTimeMillis() + TimeUnit.HOURS.toMillis(1)
         }
     }
 }

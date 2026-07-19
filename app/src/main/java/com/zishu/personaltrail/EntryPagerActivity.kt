@@ -7,8 +7,10 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.documentfile.provider.DocumentFile
 import androidx.appcompat.app.AppCompatActivity
 
 class EntryPagerActivity : AppCompatActivity() {
@@ -25,6 +27,7 @@ class EntryPagerActivity : AppCompatActivity() {
     private val line = Color.rgb(210, 222, 216)
     private var position = 0
     private lateinit var entries: List<String>
+    private var dayDirectory: DocumentFile? = null
     private var type = TYPE_NOTES
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,8 +35,8 @@ class EntryPagerActivity : AppCompatActivity() {
         window.statusBarColor = paper
         window.navigationBarColor = paper
         type = intent.getStringExtra(EXTRA_TYPE) ?: TYPE_NOTES
-        val directory = TrailStorage.root(this)?.findFile(intent.getStringExtra(EXTRA_DAY).orEmpty())
-        entries = if (type == TYPE_NOTES) TrailStorage.noteEntries(this, directory) else TrailStorage.timelineEntries(this, directory)
+        dayDirectory = TrailStorage.root(this)?.findFile(intent.getStringExtra(EXTRA_DAY).orEmpty())
+        entries = if (type == TYPE_NOTES) TrailStorage.noteEntries(this, dayDirectory) else TrailStorage.timelineEntries(this, dayDirectory)
         setContentView(buildScreen())
     }
 
@@ -58,6 +61,18 @@ class EntryPagerActivity : AppCompatActivity() {
             val content = Regex("💭 内容: \"(.*)\"").find(entry)?.groupValues?.get(1).orEmpty()
             addView(title(if (time.isBlank()) "碎碎念" else time, 14f).apply { setTextColor(teal) })
             addView(body(content.ifBlank { entry }, 18f).apply { setTextColor(ink); setPadding(0, dp(12), 0, 0) })
+            val imageName = Regex("关联图片: screenshots/(.+?) \\(手动选择\\)").find(entry)?.groupValues?.get(1)
+            val image = imageName?.let { dayDirectory?.findFile("screenshots")?.findFile(it) }
+            if (image != null) {
+                addView(space(12))
+                addView(ImageView(this@EntryPagerActivity).apply {
+                    adjustViewBounds = true
+                    maxHeight = dp(260)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    setImageURI(image.uri)
+                    background = rounded(Color.rgb(231, 240, 235), 14)
+                })
+            }
         } else {
             val lines = entry.lines()
             addView(title(lines.firstOrNull().orEmpty(), 15f).apply { setTextColor(teal) })

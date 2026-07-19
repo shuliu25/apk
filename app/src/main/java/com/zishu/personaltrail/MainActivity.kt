@@ -194,7 +194,7 @@ class MainActivity : AppCompatActivity() {
         taskInput = EditText(this@MainActivity).apply {
             hint = "我现在要做什么？"
             textSize = 15f
-            singleLine = true
+            isSingleLine = true
             setTextColor(ink)
             setHintTextColor(Color.rgb(126, 142, 136))
             setPadding(dp(14), 0, dp(14), 0)

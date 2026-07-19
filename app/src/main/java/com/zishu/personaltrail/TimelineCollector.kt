@@ -1,21 +1,16 @@
 package com.zishu.personaltrail
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
-import android.database.Cursor
 import android.net.Uri
 import android.os.BatteryManager
-import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
-import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -38,7 +33,6 @@ class TimelineCollector(private val context: Context) {
         val eventLines = collectUsageEvents(now)
         val usageSummary = collectUsageSummary(now)
         val battery = readBattery()
-        val importedImages = importRecentImages(dayDirectory, now)
         val body = buildString {
             append("\n[").append(timeFormat.format(Date(now))).append("] [").append(reason).append("]\n")
             append("电量: ").append(battery).append('\n')
@@ -46,15 +40,14 @@ class TimelineCollector(private val context: Context) {
             append("前台切换:\n")
             if (eventLines.isEmpty()) append("- 无新增事件（下次会自动补查）\n")
             else eventLines.forEach { append("- ").append(it).append('\n') }
-            append("相册新增: ")
-            append(if (importedImages.isEmpty()) "无" else importedImages.joinToString("、"))
+            append("图片: 仅在记录碎碎念时手动选择后保存")
             append('\n')
         }
         appendText(dayDirectory, "timeline.txt", body)
         CaptureResult(true, "已写入 $day/timeline.txt")
     }
 
-    suspend fun appendThought(text: String): CaptureResult = withContext(Dispatchers.IO) {
+    suspend fun appendThought(text: String, selectedImageUri: Uri?): CaptureResult = withContext(Dispatchers.IO) {
         val root = outputRoot() ?: return@withContext CaptureResult(false, "请先选择日志输出文件夹")
         val clean = text.trim()
         if (clean.isBlank()) return@withContext CaptureResult(false, "先写下一句想法")
@@ -62,12 +55,15 @@ class TimelineCollector(private val context: Context) {
         val day = dayFormat.format(Date(now))
         val dayDirectory = root.findFile(day) ?: root.createDirectory(day)
             ?: return@withContext CaptureResult(false, "无法创建当天文件夹")
+        val selectedImageName = selectedImageUri?.let { copySelectedImage(dayDirectory, it) }
+        if (selectedImageUri != null && selectedImageName == null) {
+            return@withContext CaptureResult(false, "所选图片未能保存，请重新选择")
+        }
         val old = readText(dayDirectory.findFile("notes.txt"))
         val number = Regex("(?m)^#(\\d+)").findAll(old).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()?.plus(1) ?: 1
-        val recentImage = prefs.lastScreenshotName?.takeIf { now - prefs.lastScreenshotMillis <= 10 * 60 * 1000L }
         val entry = buildString {
             append("\n#").append(number).append(" [").append(timeFormat.format(Date(now))).append("]\n")
-            if (recentImage != null) append("🖼️ 关联图片: ").append(recentImage).append(" (最近截图)\n")
+            if (selectedImageName != null) append("🖼️ 关联图片: screenshots/").append(selectedImageName).append(" (手动选择)\n")
             append("💭 内容: \"").append(clean.replace("\"", "“")).append("\"\n\n---\n")
         }
         appendText(dayDirectory, "notes.txt", entry)
@@ -118,36 +114,27 @@ class TimelineCollector(private val context: Context) {
         return "${if (level >= 0) level * 100 / scale else "未知"}%(${if (charging) "充电中" else "未充电"})"
     }
 
-    private fun importRecentImages(dayDirectory: DocumentFile, now: Long): List<String> {
-        val permission = if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-        if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) return emptyList()
-        val screenshots = dayDirectory.findFile("screenshots") ?: dayDirectory.createDirectory("screenshots") ?: return emptyList()
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.RELATIVE_PATH)
-        val selection = "${MediaStore.Images.Media.DATE_ADDED} >= ?"
-        val since = if (prefs.lastMediaMillis == 0L) now else prefs.lastMediaMillis
-        val args = arrayOf((since / 1000L).toString())
-        val imported = mutableListOf<String>()
-        var newest = prefs.lastMediaMillis
-        context.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, selection, args, "${MediaStore.Images.Media.DATE_ADDED} ASC")?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val name = cursor.string(MediaStore.Images.Media.DISPLAY_NAME) ?: continue
-                val relativePath = cursor.string(MediaStore.Images.Media.RELATIVE_PATH).orEmpty()
-                if (!relativePath.contains("Screenshots", true) && !relativePath.contains("DCIM/Camera", true)) continue
-                val added = cursor.long(MediaStore.Images.Media.DATE_ADDED) * 1000L
-                newest = max(newest, added)
-                val id = cursor.long(MediaStore.Images.Media._ID)
-                val source = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
-                val target = screenshots.findFile(name) ?: screenshots.createFile("image/jpeg", name) ?: continue
-                context.contentResolver.openInputStream(source)?.use { input ->
-                    context.contentResolver.openOutputStream(target.uri, "w")?.use { output -> input.copyTo(output) }
-                }
-                imported += name
-                prefs.lastScreenshotName = name
-                prefs.lastScreenshotMillis = added
-            }
-        }
-        prefs.lastMediaMillis = max(newest, now)
-        return imported
+    private fun copySelectedImage(dayDirectory: DocumentFile, source: Uri): String? = runCatching {
+        val screenshots = dayDirectory.findFile("screenshots") ?: dayDirectory.createDirectory("screenshots") ?: return@runCatching null
+        val originalName = context.contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }.orEmpty().ifBlank { "image-${System.currentTimeMillis()}.jpg" }
+        val name = uniqueName(screenshots, originalName.replace('/', '_').replace('\\', '_'))
+        val target = screenshots.createFile(context.contentResolver.getType(source) ?: "image/jpeg", name) ?: return@runCatching null
+        context.contentResolver.openInputStream(source)?.use { input ->
+            context.contentResolver.openOutputStream(target.uri, "w")?.use { output -> input.copyTo(output) }
+        } ?: return@runCatching null
+        name
+    }.getOrNull()
+
+    private fun uniqueName(directory: DocumentFile, original: String): String {
+        if (directory.findFile(original) == null) return original
+        val dot = original.lastIndexOf('.')
+        val stem = if (dot > 0) original.substring(0, dot) else original
+        val extension = if (dot > 0) original.substring(dot) else ""
+        var index = 2
+        while (directory.findFile("$stem-$index$extension") != null) index++
+        return "$stem-$index$extension"
     }
 
     private fun appName(packageName: String): String = runCatching {
@@ -165,8 +152,6 @@ class TimelineCollector(private val context: Context) {
         return context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
     }
 
-    private fun Cursor.string(column: String): String? = getString(getColumnIndexOrThrow(column))
-    private fun Cursor.long(column: String): Long = getLong(getColumnIndexOrThrow(column))
 }
 
 data class CaptureResult(val success: Boolean, val message: String)

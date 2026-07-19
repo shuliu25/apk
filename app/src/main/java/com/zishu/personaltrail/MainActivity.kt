@@ -1,8 +1,7 @@
 package com.zishu.personaltrail
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
@@ -14,7 +13,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
@@ -22,6 +20,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var preferences: TrailPreferences
     private lateinit var status: TextView
     private lateinit var thought: EditText
+    private lateinit var selectedImage: TextView
+    private var selectedImageUri: Uri? = null
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri == null) return@registerForActivityResult
@@ -30,6 +30,11 @@ class MainActivity : AppCompatActivity() {
         preferences.treeUri = uri.toString()
         TrailWorker.schedule(this)
         refreshStatus("已记住这个文件夹，并开始后台采集")
+    }
+
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        selectedImageUri = uri
+        updateSelectedImage()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,10 +71,9 @@ class MainActivity : AppCompatActivity() {
         column.addView(button("1. 授权使用情况访问") {
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         })
-        column.addView(button("2. 允许读取截图和照片") { requestImagePermission() })
-        column.addView(button("3. 选择日志输出文件夹") { folderPicker.launch(null) })
+        column.addView(button("2. 选择日志输出文件夹") { folderPicker.launch(null) })
         column.addView(button("现在采集一次") { captureNow() })
-        column.addView(paragraph("碎碎念（最近 10 分钟截图会自动关联）："))
+        column.addView(paragraph("碎碎念（可选：手动选择一张关联图片）："))
         thought = EditText(this).apply {
             hint = "留下一句话，不必整理好"
             minLines = 3
@@ -77,14 +81,12 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
         column.addView(thought)
+        selectedImage = paragraph("未选择图片")
+        column.addView(selectedImage)
+        column.addView(button("选择关联图片（可选）") { imagePicker.launch("image/*") })
         column.addView(button("记录这句碎碎念") { saveThought() })
-        column.addView(paragraph("提示：选择 Operit 正在同步到 GitHub 的仓库根目录；本应用只写日期文件夹，不保存 GitHub 密钥。"))
+        column.addView(paragraph("提示：选择 Operit 正在同步到 GitHub 的仓库根目录；本应用负责记录，Operit 只负责推送。本应用不保存 GitHub 密钥。"))
         return ScrollView(this).apply { addView(column) }
-    }
-
-    private fun requestImagePermission() {
-        val permission = if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-        ActivityCompat.requestPermissions(this, arrayOf(permission), 7)
     }
 
     private fun captureNow() {
@@ -96,15 +98,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveThought() {
         lifecycleScope.launch {
-            val result = TimelineCollector(this@MainActivity).appendThought(thought.text.toString())
-            if (result.success) thought.setText("")
+            val result = TimelineCollector(this@MainActivity).appendThought(thought.text.toString(), selectedImageUri)
+            if (result.success) {
+                thought.setText("")
+                selectedImageUri = null
+                updateSelectedImage()
+            }
             refreshStatus(result.message)
         }
     }
 
+    private fun updateSelectedImage() {
+        selectedImage.text = if (selectedImageUri == null) "未选择图片" else "已选择一张图片，记录时会复制进当天的 screenshots 文件夹"
+    }
+
     private fun refreshStatus(message: String? = null) {
         val folder = if (preferences.treeUri == null) "尚未选择" else "已选择"
-        val imagePermission = if (checkSelfPermission(if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) "已授权" else "未授权"
-        status.text = listOfNotNull(message, "日志文件夹：$folder｜图片权限：$imagePermission").joinToString("\n")
+        status.text = listOfNotNull(message, "日志文件夹：$folder｜图片在记录碎碎念时按需选择").joinToString("\n")
     }
 }

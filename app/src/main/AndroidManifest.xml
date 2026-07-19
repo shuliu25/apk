@@ -6,7 +6,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/personal_trail_icon"
         android:label="个人轨迹"
+        android:roundIcon="@drawable/personal_trail_icon"
         android:theme="@style/Theme.PersonalTrail"
         android:usesCleartextTraffic="false">
         <activity

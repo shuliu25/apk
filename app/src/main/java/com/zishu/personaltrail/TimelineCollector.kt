@@ -1,0 +1,172 @@
+package com.zishu.personaltrail
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.database.Cursor
+import android.net.Uri
+import android.os.BatteryManager
+import android.provider.MediaStore
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
+import androidx.core.content.ContextCompat
+import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.max
+
+class TimelineCollector(private val context: Context) {
+    private val prefs = TrailPreferences(context)
+    private val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA)
+    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.CHINA)
+
+    suspend fun capture(reason: String): CaptureResult = withContext(Dispatchers.IO) {
+        val root = outputRoot() ?: return@withContext CaptureResult(false, "请先选择日志输出文件夹")
+        if (!hasUsageAccess()) return@withContext CaptureResult(false, "请先授权“使用情况访问权限”")
+
+        val now = System.currentTimeMillis()
+        val day = dayFormat.format(Date(now))
+        val dayDirectory = root.findFile(day) ?: root.createDirectory(day)
+            ?: return@withContext CaptureResult(false, "无法创建当天文件夹")
+
+        val eventLines = collectUsageEvents(now)
+        val usageSummary = collectUsageSummary(now)
+        val battery = readBattery()
+        val importedImages = importRecentImages(dayDirectory, now)
+        val body = buildString {
+            append("\n[").append(timeFormat.format(Date(now))).append("] [").append(reason).append("]\n")
+            append("电量: ").append(battery).append('\n')
+            append("最近6小时使用: ").append(usageSummary.ifBlank { "暂无数据" }).append('\n')
+            append("前台切换:\n")
+            if (eventLines.isEmpty()) append("- 无新增事件（下次会自动补查）\n")
+            else eventLines.forEach { append("- ").append(it).append('\n') }
+            append("相册新增: ")
+            append(if (importedImages.isEmpty()) "无" else importedImages.joinToString("、"))
+            append('\n')
+        }
+        appendText(dayDirectory, "timeline.txt", body)
+        CaptureResult(true, "已写入 $day/timeline.txt")
+    }
+
+    suspend fun appendThought(text: String): CaptureResult = withContext(Dispatchers.IO) {
+        val root = outputRoot() ?: return@withContext CaptureResult(false, "请先选择日志输出文件夹")
+        val clean = text.trim()
+        if (clean.isBlank()) return@withContext CaptureResult(false, "先写下一句想法")
+        val now = System.currentTimeMillis()
+        val day = dayFormat.format(Date(now))
+        val dayDirectory = root.findFile(day) ?: root.createDirectory(day)
+            ?: return@withContext CaptureResult(false, "无法创建当天文件夹")
+        val old = readText(dayDirectory.findFile("notes.txt"))
+        val number = Regex("(?m)^#(\\d+)").findAll(old).lastOrNull()?.groupValues?.get(1)?.toIntOrNull()?.plus(1) ?: 1
+        val recentImage = prefs.lastScreenshotName?.takeIf { now - prefs.lastScreenshotMillis <= 10 * 60 * 1000L }
+        val entry = buildString {
+            append("\n#").append(number).append(" [").append(timeFormat.format(Date(now))).append("]\n")
+            if (recentImage != null) append("🖼️ 关联图片: ").append(recentImage).append(" (最近截图)\n")
+            append("💭 内容: \"").append(clean.replace("\"", "“")).append("\"\n\n---\n")
+        }
+        appendText(dayDirectory, "notes.txt", entry)
+        CaptureResult(true, "已写入 $day/notes.txt")
+    }
+
+    private fun outputRoot(): DocumentFile? = prefs.treeUri?.let { DocumentFile.fromTreeUri(context, Uri.parse(it)) }
+
+    private fun hasUsageAccess(): Boolean {
+        val manager = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+        return manager.checkOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), context.packageName) == android.app.AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun collectUsageEvents(now: Long): List<String> {
+        val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val start = max(0L, prefs.lastEventMillis - 5 * 60 * 1000L)
+        val events = manager.queryEvents(start, now)
+        val event = UsageEvents.Event()
+        val lines = mutableListOf<String>()
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val foreground = event.eventType == UsageEvents.Event.ACTIVITY_RESUMED || event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
+            val background = event.eventType == UsageEvents.Event.ACTIVITY_PAUSED || event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND
+            if (!foreground && !background) continue
+            if (event.timeStamp <= prefs.lastEventMillis) continue
+            val action = if (foreground) "进入" else "离开"
+            lines += "${timeFormat.format(Date(event.timeStamp))} $action ${appName(event.packageName)}"
+        }
+        prefs.lastEventMillis = now
+        return lines.takeLast(80)
+    }
+
+    private fun collectUsageSummary(now: Long): String {
+        val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        return manager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, now - 6 * 60 * 60 * 1000L, now)
+            .filter { it.totalTimeInForeground > 0 }
+            .sortedByDescending { it.totalTimeInForeground }
+            .take(8)
+            .joinToString("、") { "${appName(it.packageName)}(${it.totalTimeInForeground / 60000}分钟)" }
+    }
+
+    private fun readBattery(): String {
+        val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        return "${if (level >= 0) level * 100 / scale else "未知"}%(${if (charging) "充电中" else "未充电"})"
+    }
+
+    private fun importRecentImages(dayDirectory: DocumentFile, now: Long): List<String> {
+        val permission = if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+        if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) return emptyList()
+        val screenshots = dayDirectory.findFile("screenshots") ?: dayDirectory.createDirectory("screenshots") ?: return emptyList()
+        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.RELATIVE_PATH)
+        val selection = "${MediaStore.Images.Media.DATE_ADDED} >= ?"
+        val since = if (prefs.lastMediaMillis == 0L) now else prefs.lastMediaMillis
+        val args = arrayOf((since / 1000L).toString())
+        val imported = mutableListOf<String>()
+        var newest = prefs.lastMediaMillis
+        context.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, projection, selection, args, "${MediaStore.Images.Media.DATE_ADDED} ASC")?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val name = cursor.string(MediaStore.Images.Media.DISPLAY_NAME) ?: continue
+                val relativePath = cursor.string(MediaStore.Images.Media.RELATIVE_PATH).orEmpty()
+                if (!relativePath.contains("Screenshots", true) && !relativePath.contains("DCIM/Camera", true)) continue
+                val added = cursor.long(MediaStore.Images.Media.DATE_ADDED) * 1000L
+                newest = max(newest, added)
+                val id = cursor.long(MediaStore.Images.Media._ID)
+                val source = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id.toString())
+                val target = screenshots.findFile(name) ?: screenshots.createFile("image/jpeg", name) ?: continue
+                context.contentResolver.openInputStream(source)?.use { input ->
+                    context.contentResolver.openOutputStream(target.uri, "w")?.use { output -> input.copyTo(output) }
+                }
+                imported += name
+                prefs.lastScreenshotName = name
+                prefs.lastScreenshotMillis = added
+            }
+        }
+        prefs.lastMediaMillis = max(newest, now)
+        return imported
+    }
+
+    private fun appName(packageName: String): String = runCatching {
+        context.packageManager.getApplicationInfo(packageName, 0).loadLabel(context.packageManager).toString()
+    }.getOrElse { packageName }
+
+    private fun appendText(directory: DocumentFile, name: String, text: String) {
+        val file = directory.findFile(name) ?: directory.createFile("text/plain", name) ?: error("无法创建 $name")
+        val previous = readText(file)
+        context.contentResolver.openOutputStream(file.uri, "wt")!!.bufferedWriter().use { it.write(previous + text) }
+    }
+
+    private fun readText(file: DocumentFile?): String {
+        if (file == null || !file.exists()) return ""
+        return context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+    }
+
+    private fun Cursor.string(column: String): String? = getString(getColumnIndexOrThrow(column))
+    private fun Cursor.long(column: String): Long = getLong(getColumnIndexOrThrow(column))
+}
+
+data class CaptureResult(val success: Boolean, val message: String)

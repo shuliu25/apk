@@ -108,14 +108,19 @@ class TimelineCollector(private val context: Context) {
 
     private fun collectUsageEvents(now: Long): List<String> {
         val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        val start = max(0L, prefs.lastEventMillis - 5 * 60 * 1000L)
+        val sixHoursAgo = now - 6 * 60 * 60 * 1000L
+        val start = if (prefs.lastEventMillis > 0L) {
+            max(sixHoursAgo, prefs.lastEventMillis - 5 * 60 * 1000L)
+        } else sixHoursAgo
         val events = manager.queryEvents(start, now)
         val event = UsageEvents.Event()
         val lines = mutableListOf<String>()
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            val foreground = event.eventType == UsageEvents.Event.ACTIVITY_RESUMED || event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND
-            val background = event.eventType == UsageEvents.Event.ACTIVITY_PAUSED || event.eventType == UsageEvents.Event.MOVE_TO_BACKGROUND
+            // API 29+ already provides the Activity events. Do not also record
+            // MOVE_TO_FOREGROUND/BACKGROUND: many phones emit both, causing duplicates.
+            val foreground = event.eventType == UsageEvents.Event.ACTIVITY_RESUMED
+            val background = event.eventType == UsageEvents.Event.ACTIVITY_PAUSED
             if (!foreground && !background) continue
             if (event.timeStamp <= prefs.lastEventMillis) continue
             val action = if (foreground) "进入" else "离开"
@@ -127,11 +132,51 @@ class TimelineCollector(private val context: Context) {
 
     private fun collectUsageSummary(now: Long): String {
         val manager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-        return manager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, now - 6 * 60 * 60 * 1000L, now)
-            .filter { it.totalTimeInForeground > 0 }
-            .sortedByDescending { it.totalTimeInForeground }
+        val windowStart = now - 6 * 60 * 60 * 1000L
+        // INTERVAL_BEST returns calendar buckets, not a precise rolling six-hour
+        // window. Rebuild the duration from foreground intervals instead.
+        val events = manager.queryEvents(max(0L, windowStart - 24 * 60 * 60 * 1000L), now)
+        val event = UsageEvents.Event()
+        val durations = mutableMapOf<String, Long>()
+        var activePackage: String? = null
+        var activeSince = 0L
+
+        fun closeActive(at: Long) {
+            val packageName = activePackage ?: return
+            val from = max(activeSince, windowStart)
+            if (at > from) durations[packageName] = (durations[packageName] ?: 0L) + at - from
+            activePackage = null
+            activeSince = 0L
+        }
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    if (activePackage != event.packageName) {
+                        closeActive(event.timeStamp)
+                        activePackage = event.packageName
+                        activeSince = event.timeStamp
+                    }
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    if (activePackage == event.packageName) closeActive(event.timeStamp)
+                }
+            }
+        }
+        closeActive(now)
+
+        return durations.entries
+            .filter { it.value > 0 }
+            .groupBy({ appName(it.key) }, { it.value })
+            .mapValues { (_, values) -> values.sum() }
+            .entries
+            .sortedByDescending { it.value }
             .take(8)
-            .joinToString("、") { "${appName(it.packageName)}(${it.totalTimeInForeground / 60000}分钟)" }
+            .joinToString("、") { (name, duration) ->
+                val minutes = max(1L, duration / 60_000L)
+                "$name(${minutes}分钟)"
+            }
     }
 
     private fun readBattery(): String {

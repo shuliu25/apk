@@ -31,4 +31,19 @@ object TrailStorage {
         if (file == null || !file.exists()) return ""
         return context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
     }
+
+    fun noteEntries(context: Context, directory: DocumentFile?): List<String> =
+        readText(context, directory?.findFile("notes.txt"))
+            .split("\n---")
+            .map { it.trim() }
+            .filter { it.startsWith("#") }
+            .asReversed()
+
+    fun timelineEntries(context: Context, directory: DocumentFile?): List<String> =
+        readText(context, directory?.findFile("timeline.txt"))
+            .trim()
+            .split(Regex("(?=\\[\\d{2}:\\d{2}:\\d{2}\\])"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .asReversed()
 }

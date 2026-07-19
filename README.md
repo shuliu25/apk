@@ -10,7 +10,7 @@
 4. 选择 Operit 正在推送到 GitHub 的仓库根目录。应用会在其中写入 `YYYY-MM-DD/timeline.txt`、`notes.txt` 和 `screenshots/`。
 5. 在 vivo 的电池设置中允许本应用自启动、后台运行和不受电池优化限制。
 
-应用会用 WorkManager 约每 15 分钟运行一次。系统省电时可能延后，但下次会从上次采集点回查 Usage Events；它不会因延后而把中间的前台切换直接丢掉。
+应用会用 WorkManager 约每小时运行一次。系统省电时可能延后，但下次会从上次采集点回查 Usage Events；它不会因延后而把中间的前台切换直接丢掉。
 
 ## 边界
 

@@ -60,7 +60,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { action() }
         }
         column.addView(title("个人轨迹"))
-        column.addView(paragraph("不需要 Shizuku。第一次完成授权后，它会每 15 分钟左右补采手机使用轨迹。"))
+        column.addView(paragraph("不需要 Shizuku。第一次完成授权后，它会每小时左右补采手机使用轨迹。"))
         status = paragraph("")
         column.addView(status)
         column.addView(button("1. 授权使用情况访问") {

@@ -20,7 +20,7 @@ class TrailWorker(appContext: Context, params: WorkerParameters) : CoroutineWork
         private const val UNIQUE_NAME = "personal_trail_capture"
 
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<TrailWorker>(15, TimeUnit.MINUTES).build()
+            val request = PeriodicWorkRequestBuilder<TrailWorker>(1, TimeUnit.HOURS).build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 UNIQUE_NAME,
                 ExistingPeriodicWorkPolicy.UPDATE,

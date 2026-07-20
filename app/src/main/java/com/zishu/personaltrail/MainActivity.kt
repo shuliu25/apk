@@ -24,12 +24,12 @@ import java.util.Date
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
-    private val paper = Color.rgb(247, 245, 239)
-    private val ink = Color.rgb(38, 54, 49)
-    private val teal = Color.rgb(53, 104, 89)
-    private val paleTeal = Color.rgb(231, 240, 235)
-    private val line = Color.rgb(210, 222, 216)
-    private val amberPale = Color.rgb(253, 242, 219)
+    private val paper get() = getColor(R.color.background)
+    private val ink get() = getColor(R.color.on_surface)
+    private val teal get() = getColor(R.color.primary)
+    private val paleTeal get() = getColor(R.color.primary_container)
+    private val line get() = getColor(R.color.outline_variant)
+    private val amberPale get() = getColor(R.color.warning_container)
 
     private lateinit var preferences: TrailPreferences
     private lateinit var scheduleTitle: TextView
@@ -127,22 +127,27 @@ class MainActivity : AppCompatActivity() {
     private fun hero(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(22), dp(24), dp(22), dp(22))
-        background = rounded(teal, 28)
+        background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(teal, getColor(R.color.secondary))).apply {
+            cornerRadius = dp(24).toFloat()
+        }
+        elevation = dp(8).toFloat()
         addView(TextView(this@MainActivity).apply {
-            text = "个人轨迹"
+            text = "今天 · 个人轨迹"
             setTextColor(Color.WHITE)
             textSize = 30f
             typeface = Typeface.DEFAULT_BOLD
         })
         addView(space(7))
         addView(TextView(this@MainActivity).apply {
-            text = "让一天留下可回看的痕迹"
+            text = SimpleDateFormat("MM月dd日 EEEE", Locale.CHINA).format(Date())
             setTextColor(Color.rgb(224, 237, 230))
             textSize = 16f
         })
         addView(space(18))
         addView(TextView(this@MainActivity).apply {
-            text = "✦  每小时补采  ·  Operit 推送"
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.CHINA).format(Date())
+            val summary = TrailStorage.summaries(this@MainActivity).firstOrNull { it.day == today }
+            text = "✦  ${summary?.timelineCount ?: 0} 次轨迹  ·  ${summary?.noteCount ?: 0} 条想法"
             setTextColor(Color.WHITE)
             textSize = 13f
             setPadding(dp(12), dp(8), dp(12), dp(8))
@@ -154,6 +159,7 @@ class MainActivity : AppCompatActivity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(16), dp(18), dp(16))
         background = rounded(paleTeal, 22)
+        elevation = dp(2).toFloat()
         scheduleTitle = bodyText("采集节奏", 14f).apply {
             setTextColor(teal)
             typeface = Typeface.DEFAULT_BOLD
@@ -175,6 +181,7 @@ class MainActivity : AppCompatActivity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(18), dp(18), dp(18))
         background = rounded(Color.WHITE, 22, line, 1)
+        elevation = dp(3).toFloat()
         addView(TextView(this@MainActivity).apply {
             text = "给这一段命名"
             textSize = 18f
@@ -254,6 +261,7 @@ class MainActivity : AppCompatActivity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(18), dp(18), dp(18))
         background = rounded(Color.WHITE, 22, line, 1)
+        elevation = dp(3).toFloat()
         addView(TextView(this@MainActivity).apply {
             text = title
             textSize = 18f

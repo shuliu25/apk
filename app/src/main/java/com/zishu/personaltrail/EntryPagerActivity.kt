@@ -21,10 +21,10 @@ class EntryPagerActivity : AppCompatActivity() {
         const val TYPE_TIMELINE = "timeline"
     }
 
-    private val paper = Color.rgb(247, 245, 239)
-    private val ink = Color.rgb(38, 54, 49)
-    private val teal = Color.rgb(53, 104, 89)
-    private val line = Color.rgb(210, 222, 216)
+    private val paper get() = getColor(R.color.background)
+    private val ink get() = getColor(R.color.on_surface)
+    private val teal get() = getColor(R.color.primary)
+    private val line get() = getColor(R.color.outline_variant)
     private var position = 0
     private lateinit var entries: List<String>
     private var dayDirectory: DocumentFile? = null
@@ -70,7 +70,7 @@ class EntryPagerActivity : AppCompatActivity() {
                     maxHeight = dp(260)
                     scaleType = ImageView.ScaleType.CENTER_CROP
                     setImageURI(image.uri)
-                    background = rounded(Color.rgb(231, 240, 235), 14)
+                    background = rounded(getColor(R.color.secondary_container), 14)
                 })
             }
         } else {

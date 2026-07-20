@@ -13,10 +13,10 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
 class RecordsActivity : AppCompatActivity() {
-    private val paper = Color.rgb(247, 245, 239)
-    private val ink = Color.rgb(38, 54, 49)
-    private val teal = Color.rgb(53, 104, 89)
-    private val line = Color.rgb(210, 222, 216)
+    private val paper get() = getColor(R.color.background)
+    private val ink get() = getColor(R.color.on_surface)
+    private val teal get() = getColor(R.color.primary)
+    private val line get() = getColor(R.color.outline_variant)
     private var position = 0
     private var summaries = emptyList<DaySummary>()
 

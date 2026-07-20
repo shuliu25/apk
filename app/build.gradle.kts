@@ -11,8 +11,8 @@ android {
         applicationId = "com.zishu.personaltrail"
         minSdk = 29
         targetSdk = 35
-    versionCode = 9
-    versionName = "0.3.2"
+        versionCode = 10
+        versionName = "0.4.0"
     }
 
     compileOptions {
@@ -32,4 +32,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    implementation("com.google.android.material:material:1.12.0")
 }

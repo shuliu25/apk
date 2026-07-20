@@ -1,5 +1,6 @@
 <resources>
     <color name="primary">#5B6EF5</color>
+    <color name="on_primary">#FFFFFF</color>
     <color name="primary_container">#E8EAFE</color>
     <color name="secondary">#7B61FF</color>
     <color name="secondary_container">#EDE8FF</color>

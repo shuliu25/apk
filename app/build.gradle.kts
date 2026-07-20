@@ -11,8 +11,8 @@ android {
         applicationId = "com.zishu.personaltrail"
         minSdk = 29
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.4.0"
+        versionCode = 11
+        versionName = "0.5.0"
     }
 
     compileOptions {
